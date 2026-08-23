@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="/static/app.css"><title>ParcelPilot Support</title>
+</head>
+<body data-csrf="{{ actor.csrf_token }}" data-data-ready="{{ 'true' if data_ready else 'false' }}">
+  <header class="topbar">
+    <div><p class="eyebrow">PARCELPILOT · {{ actor.role|replace('_', ' ')|upper }}</p><h1>{{ actor.display_name }}</h1>
+    {% if actor.account_id %}<p class="subtle">{{ actor.account_id }} · access is restricted to this account.</p>{% endif %}</div>
+    <div class="topbar-actions"><span class="status">AI mode: {{ provider }}</span><form method="post" action="/logout"><input type="hidden" name="csrf_token" value="{{ actor.csrf_token }}"><button class="quiet">Sign out</button></form></div>
+  </header>
+  <main class="layout">
+    <section class="chat-panel" aria-label="Support chat">
+      <div class="chat-title"><div><h2>Support assistant</h2><p>Answers are grounded in current authorised records and sources.</p></div>{% if not data_ready %}<span class="warning">Data pack unavailable</span>{% endif %}</div>
+      {% if provider_configuration_required %}<p class="mode-notice">Provider mode is selected but no API key is configured. Set <code>LLM_API_KEY</code> and restart, or use <code>LLM_MODE=auto</code> for limited deterministic fallback.</p>{% elif not full_chat_available %}<p class="mode-notice">Limited fallback is active. It safely handles order/ticket workflows and evidence lookup; add an OpenAI-compatible provider key for full conversational tool use.</p>{% endif %}
+      <div id="messages" aria-live="polite"><article class="message assistant">{% if full_chat_available %}Ask about an order, policy, ticket, service credit, or known issue. I will show the evidence I used.{% elif provider_configuration_required %}Provider configuration is incomplete. Add a provider API key and restart the service to enable chat.{% else %}Limited fallback is active. Enter an order or ticket ID for a deterministic decision, or configure a provider key for full conversational support.{% endif %}</article></div>
+      <form id="chat-form"><label class="sr-only" for="message">Message</label><textarea id="message" maxlength="4000" placeholder="{% if full_chat_available %}Can Northstar cancel ORD-1001 without a fee?{% else %}Limited fallback: Can I cancel ORD-1001?{% endif %}" required{% if not data_ready or provider_configuration_required %} disabled{% endif %}></textarea><div class="composer"><span id="composer-status" class="subtle" aria-live="polite"></span><button id="send-button" type="submit"{% if not data_ready or provider_configuration_required %} disabled{% endif %}>Send</button></div></form>
+    </section>
+    <aside class="side-panel">
+      <section><h2>Evidence & tools</h2><p class="subtle">Only the titles, records, and excerpts used for this answer appear here.</p><div id="events" aria-live="polite"><p class="empty">Tool activity will appear here.</p></div></section>
+      {% if actor.role == 'operations_lead' %}<section class="insights-section"><div class="section-row"><h2>Operations signals</h2><button id="load-insights" type="button">Refresh</button></div><div id="insights"><p class="empty">Load prioritised, cross-account signals.</p></div></section>{% endif %}
+    </aside>
+  </main>
+  <script src="/static/app.js"></script>
+</body></html>
