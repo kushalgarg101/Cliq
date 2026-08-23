@@ -64,6 +64,7 @@ class Agent:
             return {"error": str(error)}
 
     def reply(self, message: str, actor: dict[str, Any]) -> dict[str, Any]:
+        message = self._normalise_record_references(message)
         events: list[dict[str, Any]] = []
         small_talk = self._small_talk_reply(message)
         if small_talk:
@@ -241,6 +242,15 @@ class Agent:
             elif event.get("tool") in {"evaluate_order", "evaluate_ticket", "lookup_operations"}:
                 compact.append({"tool": event["tool"], "result": result})
         return json.dumps(compact, ensure_ascii=False)
+
+    @staticmethod
+    def _normalise_record_references(message: str) -> str:
+        return re.sub(
+            r"\b(ORD|TKT)-\s*(\d+)\b",
+            lambda match: f"{match.group(1).upper()}-{match.group(2)}",
+            message,
+            flags=re.IGNORECASE,
+        )
 
     @staticmethod
     def _small_talk_reply(message: str) -> str | None:

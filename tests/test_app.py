@@ -113,6 +113,18 @@ def test_northstar_contract_overrides_default_cancellation_fee():
     assert any(event["tool"] == "evaluate_order" for event in body["events"])
 
 
+def test_spaced_order_reference_is_normalised_before_evaluation():
+    client = TestClient(app)
+    csrf_token = sign_in(client, "northstar")
+    response = client.post(
+        "/api/chat",
+        headers={"X-CSRF-Token": csrf_token},
+        json={"message": "Can Northstar cancel ORD- 1001 without a fee?"},
+    )
+    assert response.status_code == 200
+    assert "Fee: 0 INR" in response.json()["answer"]
+    assert any(event["tool"] == "evaluate_order" for event in response.json()["events"])
+
 def test_lumenworks_credit_uses_contract_threshold_and_amount():
     client = TestClient(app)
     csrf_token = sign_in(client, "lumenworks")
