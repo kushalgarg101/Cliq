@@ -54,6 +54,12 @@ def test_login_rejects_invalid_password():
     assert response.status_code == 401
 
 
+def test_health_check_is_ready_when_the_pack_is_ingested():
+    response = TestClient(app).get("/healthz")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok", "data_ready": True}
+
+
 def test_customer_cannot_access_operations_insights():
     client = TestClient(app)
     sign_in(client, "northstar")

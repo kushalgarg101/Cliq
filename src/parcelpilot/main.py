@@ -38,6 +38,14 @@ def llm_status() -> str:
     return f"{settings.llm_provider} · {settings.llm_model}"
 
 
+@app.get("/healthz")
+def healthz():
+    """Unauthenticated deployment health check; it never reveals tenant data."""
+    if not data_ready:
+        raise HTTPException(503, "Assessment data pack is not ready.")
+    return {"status": "ok", "data_ready": True}
+
+
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
     response = await call_next(request)
