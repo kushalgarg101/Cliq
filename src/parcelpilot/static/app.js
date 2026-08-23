@@ -10,10 +10,123 @@ const appConfig = {
 };
 const headers = {'Content-Type': 'application/json', 'X-CSRF-Token': appConfig.csrf};
 
+function appendInlineText(parent, value) {
+  const parts = String(value).split(/(\*\*[^*\n]+\*\*)/g);
+  for (const part of parts) {
+    const match = part.match(/^\*\*([^*\n]+)\*\*$/);
+    if (match) {
+      const strong = document.createElement('strong');
+      strong.textContent = match[1];
+      parent.append(strong);
+    } else {
+      parent.append(document.createTextNode(part));
+    }
+  }
+}
+
+function tableCells(line) {
+  return line.trim().replace(/^\||\|$/g, '').split('|').map((cell) => cell.trim());
+}
+
+function isTableDivider(line) {
+  return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
+}
+
+function appendTable(parent, header, rows) {
+  const wrap = document.createElement('div');
+  wrap.className = 'md-table-wrap';
+  const table = document.createElement('table');
+  table.className = 'md-table';
+  const thead = document.createElement('thead');
+  const headRow = document.createElement('tr');
+  for (const cell of header) {
+    const th = document.createElement('th');
+    th.scope = 'col';
+    appendInlineText(th, cell);
+    headRow.append(th);
+  }
+  thead.append(headRow);
+  table.append(thead);
+  const tbody = document.createElement('tbody');
+  for (const row of rows) {
+    const tr = document.createElement('tr');
+    for (let index = 0; index < header.length; index += 1) {
+      const td = document.createElement('td');
+      appendInlineText(td, row[index] || '');
+      tr.append(td);
+    }
+    tbody.append(tr);
+  }
+  table.append(tbody);
+  wrap.append(table);
+  parent.append(wrap);
+}
+
+function renderAssistantMessage(article, text) {
+  const lines = String(text).replace(/\r\n/g, '\n').split('\n');
+  for (let index = 0; index < lines.length;) {
+    const line = lines[index];
+    if (!line.trim()) {
+      index += 1;
+      continue;
+    }
+    if (/^\s*\|.+\|\s*$/.test(line) && isTableDivider(lines[index + 1] || '')) {
+      const header = tableCells(line);
+      const rows = [];
+      index += 2;
+      while (index < lines.length && /^\s*\|.+\|\s*$/.test(lines[index])) rows.push(tableCells(lines[index++]));
+      appendTable(article, header, rows);
+      continue;
+    }
+    const heading = line.match(/^\s{0,3}#{1,3}\s+(.+)$/);
+    const boldHeading = line.match(/^\s*\*\*([^*]+)\*\*\s*$/);
+    if (heading || boldHeading) {
+      const title = document.createElement('h3');
+      appendInlineText(title, (heading || boldHeading)[1]);
+      article.append(title);
+      index += 1;
+      continue;
+    }
+    if (/^\s*(?:---|\*\*\*|___)\s*$/.test(line)) {
+      article.append(document.createElement('hr'));
+      index += 1;
+      continue;
+    }
+    if (/^\s*[-*]\s+/.test(line)) {
+      const list = document.createElement('ul');
+      while (index < lines.length) {
+        const item = lines[index].match(/^\s*[-*]\s+(.+)$/);
+        if (!item) break;
+        const li = document.createElement('li');
+        appendInlineText(li, item[1]);
+        list.append(li);
+        index += 1;
+      }
+      article.append(list);
+      continue;
+    }
+    const paragraph = [];
+    while (index < lines.length && lines[index].trim()
+      && !/^\s{0,3}#{1,3}\s+/.test(lines[index])
+      && !/^\s*\*\*[^*]+\*\*\s*$/.test(lines[index])
+      && !/^\s*(?:---|\*\*\*|___)\s*$/.test(lines[index])
+      && !/^\s*[-*]\s+/.test(lines[index])
+      && !(/^\s*\|.+\|\s*$/.test(lines[index]) && isTableDivider(lines[index + 1] || ''))) {
+      paragraph.push(lines[index].trim());
+      index += 1;
+    }
+    const element = document.createElement('p');
+    appendInlineText(element, paragraph.join(' '));
+    article.append(element);
+  }
+  if (!article.childNodes.length) article.textContent = String(text);
+}
+
 function addMessage(kind, text) {
   const article = document.createElement('article');
   article.className = `message ${kind}`;
-  article.textContent = text;
+  if (kind === 'assistant') renderAssistantMessage(article, text);
+  else article.textContent = text;
   messages.append(article);
   messages.scrollTop = messages.scrollHeight;
 }

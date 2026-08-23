@@ -113,3 +113,14 @@ details { color: #52616b; line-height: 1.45; margin-top: 20px; }
   .chat-panel, .side-panel { padding: 15px; }
   .message { max-width: 95%; }
 }
+
+.message.user { white-space: pre-wrap; }
+.message p { margin: 0 0 10px; }
+.message p:last-child { margin-bottom: 0; }
+.message h3 { margin: 0 0 8px; font-size: .95rem; }
+.message ul { margin: 0 0 10px; padding-left: 20px; }
+.message hr { margin: 12px 0; border: 0; border-top: 1px solid var(--border); }
+.md-table-wrap { margin: 10px 0; overflow-x: auto; }
+.md-table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: .84rem; }
+.md-table th, .md-table td { padding: 8px 10px; border: 1px solid var(--border); text-align: left; vertical-align: top; }
+.md-table th { background: var(--surface-2); }

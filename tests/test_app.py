@@ -119,7 +119,7 @@ def test_spaced_order_reference_is_normalised_before_evaluation():
     response = client.post(
         "/api/chat",
         headers={"X-CSRF-Token": csrf_token},
-        json={"message": "Can Northstar cancel ORD- 1001 without a fee?"},
+        json={"message": "Can Northstar cancel ord -1001 without a fee?"},
     )
     assert response.status_code == 200
     assert "Fee: 0 INR" in response.json()["answer"]

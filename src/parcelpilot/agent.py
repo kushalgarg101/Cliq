@@ -246,7 +246,7 @@ class Agent:
     @staticmethod
     def _normalise_record_references(message: str) -> str:
         return re.sub(
-            r"\b(ORD|TKT)-\s*(\d+)\b",
+            r"\b(ORD|TKT)\s*-\s*(\d+)\b",
             lambda match: f"{match.group(1).upper()}-{match.group(2)}",
             message,
             flags=re.IGNORECASE,
