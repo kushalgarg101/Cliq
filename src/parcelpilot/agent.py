@@ -341,8 +341,9 @@ class Agent:
             return False
         return bool(
             re.search(
-                r"\b(?:please\s+)?(?:escalate|create|open|raise|start|schedule|update)\b|"
-                r"\b(?:can|could)\s+you\s+(?:escalate|create|open|raise|start|schedule|update)\b|"
+                r"\b(?:please\s+)?(?:cancel|escalate|create|open|raise|start|schedule|update)\b|"
+                r"\b(?:can|could)\s+you\s+(?:cancel|escalate|create|open|raise|start|schedule|update)\b|"
+                r"\b(?:i\s+(?:want|need)\s+to\s+cancel)\b|"
                 r"\b(?:create|start|schedule)\s+(?:a\s+)?follow\s*-?\s*up\b|"
                 r"\b(?:please\s+)?follow\s*-?\s*up\b",
                 text,
@@ -353,7 +354,8 @@ class Agent:
         if not self._requests_action(message):
             return None
         action_type = "create_escalation" if "escalat" in message.lower() else "create_follow_up"
-        return prepare_action(self.source_db, self.runtime_db, actor, action_type, {**reference, "reason": "User explicitly requested this action after the evidence review."})
+        reason = "Cancellation execution is outside this demo's capabilities; create a human follow-up after confirmation." if "cancel" in message.lower() else "User explicitly requested this action after the evidence review."
+        return prepare_action(self.source_db, self.runtime_db, actor, action_type, {**reference, "reason": reason})
 
     def _order_answer(self, evaluation: dict[str, Any], text: str, sources: dict[str, Any]) -> str:
         cancellation_terms = ("cancel", "cancellation", "fee")

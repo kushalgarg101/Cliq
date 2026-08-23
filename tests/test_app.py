@@ -349,6 +349,19 @@ def test_question_about_an_action_does_not_prepare_one():
     assert all(event["tool"] != "prepare_action" for event in response.json()["events"])
 
 
+def test_explicit_cancellation_request_prepares_confirmable_human_follow_up():
+    client = TestClient(app)
+    csrf_token = sign_in(client, "northstar")
+    response = client.post(
+        "/api/chat",
+        headers={"X-CSRF-Token": csrf_token},
+        json={"message": "Please cancel ORD-1001."},
+    )
+    assert response.status_code == 200
+    pending = next(event["result"] for event in response.json()["events"] if event["tool"] == "prepare_action")
+    assert pending["action_type"] == "create_follow_up"
+    assert pending["requires_confirmation"] is True
+
 def test_cancellation_request_with_pickup_word_still_uses_cancellation_decision():
     client = TestClient(app)
     csrf_token = sign_in(client, "northstar")
