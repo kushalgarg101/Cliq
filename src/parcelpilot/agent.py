@@ -131,14 +131,15 @@ class Agent:
         messages.append({"role": "user", "content": message})
         corrective_round_requested = False
         for _ in range(6):
-            response = client.chat.completions.create(
-                model=self.settings.llm_model,
-                messages=messages,
-                tools=TOOLS,
-                tool_choice="none" if use_precollected_evidence else "auto",
-                temperature=0,
-                max_tokens=700,
-            )
+            completion_args: dict[str, Any] = {
+                "model": self.settings.llm_model,
+                "messages": messages,
+                "temperature": 0,
+                "max_tokens": 700,
+            }
+            if not use_precollected_evidence:
+                completion_args.update({"tools": TOOLS, "tool_choice": "auto"})
+            response = client.chat.completions.create(**completion_args)
             if not response.choices:
                 raise RuntimeError("Provider returned no completion choices.")
             choice = response.choices[0].message

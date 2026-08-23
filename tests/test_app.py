@@ -195,7 +195,8 @@ def test_provider_explains_precollected_sources_in_one_model_call(monkeypatch):
     )
     assert result["mode"] == "provider"
     assert [event["tool"] for event in result["events"]] == ["search_knowledge"]
-    assert calls[0]["tool_choice"] == "none"
+    assert "tools" not in calls[0]
+    assert "tool_choice" not in calls[0]
     assert "Evidence:" in result["answer"]
 
 
