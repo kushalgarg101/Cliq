@@ -65,11 +65,26 @@ class Agent:
 
     def reply(self, message: str, actor: dict[str, Any]) -> dict[str, Any]:
         events: list[dict[str, Any]] = []
+        small_talk = self._small_talk_reply(message)
+        if small_talk:
+            return {"answer": small_talk, "events": events, "mode": "deterministic"}
         if self.settings.llm_mode == "provider" and not self.settings.llm_api_key:
             return {"answer": "The configured AI provider has no API key. Set LLM_API_KEY or use offline mode.", "events": events, "mode": "configuration_error"}
         if self.settings.llm_mode != "offline" and self.settings.llm_api_key:
+            self._precollect_evidence(message, actor, events)
+            use_precollected_evidence = any(
+                event.get("tool") == "search_knowledge" and event.get("result", {}).get("sources")
+                for event in events
+            )
             try:
-                return self._provider_reply(message, actor, events)
+                response = self._provider_reply(
+                    message,
+                    actor,
+                    events,
+                    use_precollected_evidence=use_precollected_evidence,
+                )
+                self._append_prepared_action(message, actor, events, response)
+                return response
             except (OpenAIError, OSError, RuntimeError) as error:
                 logger.warning("AI provider failed (%s); using deterministic fallback.", type(error).__name__)
                 events.append({"tool": "provider", "error": "Provider unavailable; used deterministic fallback.", "mode": "offline_fallback"})
@@ -82,8 +97,15 @@ class Agent:
                 return fallback
         return self._fallback(message, actor, events)
 
-    def _provider_reply(self, message: str, actor: dict[str, Any], events: list[dict[str, Any]]) -> dict[str, Any]:
-        # Free OpenRouter models can legitimately take longer than a typical
+    def _provider_reply(
+        self,
+        message: str,
+        actor: dict[str, Any],
+        events: list[dict[str, Any]],
+        *,
+        use_precollected_evidence: bool = False,
+    ) -> dict[str, Any]:
+        # Free compatible-provider models can legitimately take longer than a typical
         # consumer-chat response. One bounded request is safer than retries:
         # retries multiply latency and may duplicate provider-side work.
         client = OpenAI(
@@ -93,14 +115,27 @@ class Agent:
             timeout=60.0,
             max_retries=0,
         )
-        messages: list[Any] = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": message}]
+        messages: list[Any] = [{"role": "system", "content": SYSTEM}]
+        if use_precollected_evidence:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "The server has already collected the authorised evidence below. "
+                        "Use only this evidence, explain the answer clearly, and cite the source filenames/pages. "
+                        "Do not call further tools.\n\n"
+                        + self._provider_evidence_context(events)
+                    ),
+                }
+            )
+        messages.append({"role": "user", "content": message})
         corrective_round_requested = False
         for _ in range(6):
             response = client.chat.completions.create(
                 model=self.settings.llm_model,
                 messages=messages,
                 tools=TOOLS,
-                tool_choice="auto",
+                tool_choice="none" if use_precollected_evidence else "auto",
                 temperature=0,
                 max_tokens=700,
             )
@@ -161,6 +196,83 @@ class Agent:
                 events.append({"tool": call.function.name, "result": result})
                 messages.append({"role": "tool", "tool_call_id": call.id, "content": json.dumps(result)})
         return {"answer": "I gathered the available evidence but need a support specialist to complete this safely.", "events": events, "mode": "provider"}
+
+    def _precollect_evidence(self, message: str, actor: dict[str, Any], events: list[dict[str, Any]]) -> None:
+        """Route factual requests through server-side tools before one provider explanation call."""
+        order_match = re.search(r"ORD-\d+", message.upper())
+        ticket_match = re.search(r"TKT-\d+", message.upper())
+        account_id = actor.get("account_id")
+        if order_match:
+            evaluation = evaluate_order(self.source_db, actor, order_match.group())
+            events.append({"tool": "evaluate_order", "result": evaluation})
+            account_id = evaluation.get("account", {}).get("account_id", account_id)
+        elif ticket_match:
+            evaluation = evaluate_ticket(self.source_db, actor, ticket_match.group())
+            events.append({"tool": "evaluate_ticket", "result": evaluation})
+            account_id = evaluation.get("account", {}).get("account_id", account_id)
+        elif actor["role"] != "customer":
+            account_lookup = lookup_operations(self.source_db, actor, account_query=message)
+            if account_lookup.get("account"):
+                events.append({"tool": "lookup_operations", "result": account_lookup})
+                account_id = account_lookup["account"]["account_id"]
+        sources = search_knowledge(self.source_db, actor, message, account_id)
+        events.append({"tool": "search_knowledge", "result": sources})
+
+    @staticmethod
+    def _provider_evidence_context(events: list[dict[str, Any]]) -> str:
+        compact: list[dict[str, Any]] = []
+        for event in events:
+            result = event.get("result", {})
+            if event.get("tool") == "search_knowledge":
+                compact.append(
+                    {
+                        "tool": "search_knowledge",
+                        "sources": [
+                            {
+                                "filename": source["filename"],
+                                "page": source["page"],
+                                "excerpt": source.get("excerpt", "")[:500],
+                            }
+                            for source in result.get("sources", [])[:3]
+                        ],
+                    }
+                )
+            elif event.get("tool") in {"evaluate_order", "evaluate_ticket", "lookup_operations"}:
+                compact.append({"tool": event["tool"], "result": result})
+        return json.dumps(compact, ensure_ascii=False)
+
+    @staticmethod
+    def _small_talk_reply(message: str) -> str | None:
+        normalised = re.sub(r"\s+", " ", message.strip().lower()).strip("!.? ")
+        if normalised in {"hi", "hello", "hey", "good morning", "good afternoon", "good evening"}:
+            return "Hello — I can help with shipment orders, cancellations, service credits, support tickets, and current ParcelPilot policies. What would you like to check?"
+        if normalised in {"help", "what can you do", "what do you do"}:
+            return "I can look up authorised shipment and ticket facts, retrieve current policies and customer agreements, assess cancellations or service credits, and prepare an escalation or follow-up for your confirmation."
+        return None
+
+    def _append_prepared_action(
+        self,
+        message: str,
+        actor: dict[str, Any],
+        events: list[dict[str, Any]],
+        response: dict[str, Any],
+    ) -> None:
+        if not self._requests_action(message):
+            return
+        order_match = re.search(r"ORD-\d+", message.upper())
+        ticket_match = re.search(r"TKT-\d+", message.upper())
+        reference = (
+            {"order_id": order_match.group()}
+            if order_match
+            else ({"ticket_id": ticket_match.group()} if ticket_match else None)
+        )
+        if not reference:
+            return
+        action = self._draft_action_if_requested(message, actor, reference)
+        if action:
+            events.append({"tool": "prepare_action", "result": action})
+            response["answer"] += "\n\nI prepared an action draft. Review and explicitly confirm it in the Evidence & tools panel."
+
 
     def _fallback(self, message: str, actor: dict[str, Any], events: list[dict[str, Any]]) -> dict[str, Any]:
         text = message.lower()

@@ -54,6 +54,20 @@ def test_login_rejects_invalid_password():
     assert response.status_code == 401
 
 
+def test_greeting_is_helpful_without_retrieval_or_escalation():
+    client = TestClient(app)
+    csrf_token = sign_in(client, "northstar")
+    response = client.post(
+        "/api/chat",
+        headers={"X-CSRF-Token": csrf_token},
+        json={"message": "hello"},
+    )
+    assert response.status_code == 200
+    assert response.json()["mode"] == "deterministic"
+    assert "Hello" in response.json()["answer"]
+    assert response.json()["events"] == []
+
+
 def test_health_check_is_ready_when_the_pack_is_ingested():
     response = TestClient(app).get("/healthz")
     assert response.status_code == 200
@@ -157,6 +171,31 @@ def test_provider_receives_one_corrective_round_when_it_omits_retrieval(monkeypa
     )
     assert result["mode"] == "provider"
     assert [event["tool"] for event in result["events"]] == ["evaluate_order", "search_knowledge"]
+    assert "Evidence:" in result["answer"]
+
+
+def test_provider_explains_precollected_sources_in_one_model_call(monkeypatch):
+    calls = []
+
+    class FakeCompletions:
+        @staticmethod
+        def create(**kwargs):
+            calls.append(kwargs)
+            message = SimpleNamespace(content="P1 is the highest support severity.", tool_calls=None)
+            return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+    class FakeOpenAI:
+        def __init__(self, **_kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr("parcelpilot.agent.OpenAI", FakeOpenAI)
+    result = Agent(settings, settings.source_db, settings.runtime_db).reply(
+        "What is the current standard support response target for a P1 incident?",
+        actor("maya"),
+    )
+    assert result["mode"] == "provider"
+    assert [event["tool"] for event in result["events"]] == ["search_knowledge"]
+    assert calls[0]["tool_choice"] == "none"
     assert "Evidence:" in result["answer"]
 
 
