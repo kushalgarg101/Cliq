@@ -1,0 +1,11 @@
+.env
+.venv/
+.uv-cache/
+.uv-test-cache/
+var/
+design.md
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.py[cod]
+data/

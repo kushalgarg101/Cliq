@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: parcelpilot-support-agent
+    runtime: docker
+    plan: free
+    envVars:
+      - key: APP_ENV
+        value: demo
+      - key: APP_COOKIE_SECURE
+        value: true
+      - key: LLM_MODE
+        value: auto
