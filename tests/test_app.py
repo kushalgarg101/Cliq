@@ -12,6 +12,7 @@ from parcelpilot.db import connect
 from parcelpilot.main import app, settings
 from parcelpilot.services import (
     _parse_agreement_rules,
+    _parse_sop_rules,
     confirm_action,
     lookup_operations,
     prepare_action,
@@ -137,6 +138,19 @@ def test_lumenworks_credit_uses_contract_threshold_and_amount():
     assert response.status_code == 200
     assert "Credit amount: 300 INR" in response.json()["answer"]
 
+
+def test_default_sop_rules_are_parsed_from_document_text():
+    rules = _parse_sop_rules(
+        """DRAFT: May be cancelled with no fee. BOOKED, not yet PICKED_UP: No fee within 45 minutes of booking.
+        After 45 minutes, charge INR 375. Under the default policy, a customer is eligible when the pickup is more
+        than 3 hours past the end of the scheduled pickup window. The default credit is the lower of INR 650 or 12% of the shipment fee.
+        PICKED_UP: Do not cancel. DELIVERED: Cannot be cancelled."""
+    )
+    assert rules["booking_cancellation_window_minutes"] == 45
+    assert rules["booking_cancellation_fee_inr"] == 375
+    assert rules["default_credit_threshold_minutes"] == 180
+    assert rules["default_credit_cap_inr"] == 650
+    assert rules["default_credit_percent"] == 12
 
 def test_agreement_rules_are_parsed_from_contract_text_not_known_account_ids():
     rules = _parse_agreement_rules(

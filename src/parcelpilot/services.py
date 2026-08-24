@@ -106,6 +106,40 @@ def _agreement_rules(source_db, account_id: str) -> dict[str, Any]:
     return _parse_agreement_rules(agreement["filename"], agreement["text"], account_id)
 
 
+def _parse_sop_rules(text: str) -> dict[str, Any]:
+    """Extract the current default rules from the supplied SOP, failing closed if wording changes."""
+    normalised = _normalise_document_text(text)
+    cancellation = re.search(
+        r"\bno\s+fee\s+within\s+(\d+)\s+minutes?\s+of\s+booking\.?\s+after\s+\1\s+minutes?,?\s+charge\s+INR\s+([\d,]+)",
+        normalised,
+        re.IGNORECASE,
+    )
+    credit = re.search(
+        r"\bpickup\s+is\s+more\s+than\s+(\d+)\s+hours?.*?\bdefault\s+credit\s+is\s+the\s+lower\s+of\s+INR\s+([\d,]+)\s+or\s+(\d+)%\s+of\s+the\s+shipment\s+fee\b",
+        normalised,
+        re.IGNORECASE,
+    )
+    if not cancellation or not credit:
+        return {}
+    return {
+        "booking_cancellation_window_minutes": int(cancellation.group(1)),
+        "booking_cancellation_fee_inr": int(cancellation.group(2).replace(",", "")),
+        "default_credit_threshold_minutes": int(credit.group(1)) * 60,
+        "default_credit_cap_inr": int(credit.group(2).replace(",", "")),
+        "default_credit_percent": int(credit.group(3)),
+        "draft_cancellation_allowed": bool(re.search(r"\bDRAFT\s*:\s*May\s+be\s+cancelled\s+with\s+no\s+fee\b", normalised, re.IGNORECASE)),
+        "picked_up_return_to_origin": bool(re.search(r"\bPICKED_UP\s*:\s*Do\s+not\s+cancel\b", normalised, re.IGNORECASE)),
+        "delivered_cancellation_blocked": bool(re.search(r"\bDELIVERED\s*:\s*Cannot\s+be\s+cancelled\b", normalised, re.IGNORECASE)),
+    }
+
+
+def _current_sop_rules(source_db) -> dict[str, Any]:
+    with connect(source_db) as db:
+        sop = db.execute(
+            "SELECT text FROM documents WHERE category='cancellation_sop' AND status='current' ORDER BY authority DESC LIMIT 1"
+        ).fetchone()
+    return _parse_sop_rules(sop["text"]) if sop else {}
+
 def _is_true(value: Any) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes"}
 
@@ -237,11 +271,14 @@ def evaluate_order(source_db, actor: dict[str, Any], order_id: str) -> dict[str,
         return record
     order, account = record["order"], record["account"]
     agreement = _agreement_rules(source_db, account["account_id"])
+    sop = _current_sop_rules(source_db)
     snapshot = _parse_time(record["snapshot_at"])
     pickup_end = _parse_time(order["pickup_window_end"])
     cancellation: dict[str, Any] = {"eligible": False, "outcome": "No cancellation request is recorded."}
     if order["status"] == "DRAFT":
-        cancellation = {"eligible": True, "fee_inr": 0, "outcome": "Draft shipments can be cancelled with no fee."}
+        cancellation = ({"eligible": True, "fee_inr": 0, "outcome": "Draft shipments can be cancelled with no fee under the current SOP."}
+                        if sop.get("draft_cancellation_allowed")
+                        else {"eligible": False, "outcome": "The current SOP cancellation rule could not be verified; escalate for review."})
     elif order["status"] == "BOOKED" and not order["pickup_actual_at"]:
         if agreement.get("cancellation_fee_waiver_before_pickup"):
             cancellation = {
@@ -249,6 +286,8 @@ def evaluate_order(source_db, actor: dict[str, Any], order_id: str) -> dict[str,
                 "fee_inr": 0,
                 "outcome": f"The active agreement ({agreement['document']}) waives the fee before pickup.",
             }
+        elif not {"booking_cancellation_window_minutes", "booking_cancellation_fee_inr"}.issubset(sop):
+            cancellation = {"eligible": False, "outcome": "The current SOP cancellation fee rule could not be verified; escalate for review."}
         elif order["cancellation_requested_at"]:
             requested_at = _parse_time(order["cancellation_requested_at"])
             booked_at = _parse_time(order["booked_at"])
@@ -256,14 +295,18 @@ def evaluate_order(source_db, actor: dict[str, Any], order_id: str) -> dict[str,
                 cancellation = {"eligible": False, "outcome": "Recorded cancellation timing is invalid or incomplete; escalate for review."}
             else:
                 elapsed = requested_at - booked_at
-                fee = 0 if elapsed <= timedelta(minutes=30) else 250
+                fee = 0 if elapsed <= timedelta(minutes=sop["booking_cancellation_window_minutes"]) else sop["booking_cancellation_fee_inr"]
                 cancellation = {"eligible": True, "fee_inr": fee, "elapsed_minutes": int(elapsed.total_seconds() // 60), "outcome": "The current SOP applies because no agreement waiver exists."}
         else:
             cancellation = {"eligible": True, "fee_inr": "pending", "outcome": "Cancellation timing is needed to determine the default fee."}
     elif order["status"] == "PICKED_UP":
-        cancellation = {"eligible": False, "outcome": "Do not cancel after pickup; use return-to-origin if requested."}
+        cancellation = ({"eligible": False, "outcome": "Do not cancel after pickup; use return-to-origin if requested."}
+                        if sop.get("picked_up_return_to_origin")
+                        else {"eligible": False, "outcome": "The current SOP post-pickup rule could not be verified; escalate for review."})
     elif order["status"] == "DELIVERED":
-        cancellation = {"eligible": False, "outcome": "Delivered shipments cannot be cancelled."}
+        cancellation = ({"eligible": False, "outcome": "Delivered shipments cannot be cancelled."}
+                        if sop.get("delivered_cancellation_blocked")
+                        else {"eligible": False, "outcome": "The current SOP delivered-order rule could not be verified; escalate for review."})
     delay_minutes = int((snapshot - pickup_end).total_seconds() // 60) if pickup_end and snapshot else None
     if delay_minutes is not None and delay_minutes < 0:
         delay_minutes = None
@@ -279,12 +322,17 @@ def evaluate_order(source_db, actor: dict[str, Any], order_id: str) -> dict[str,
                 "outcome": f"The active agreement ({agreement['document']}) replaces the default credit threshold and amount.",
             }
         else:
-            try:
-                amount = min(500, round(float(order["shipment_fee_inr"]) * 0.10))
-            except (TypeError, ValueError):
-                service_credit = {"eligible": False, "delay_minutes": delay_minutes, "outcome": "The carrier fault is established, but the shipment fee is missing or invalid; escalate before calculating a credit."}
+            required_credit_rules = {"default_credit_threshold_minutes", "default_credit_cap_inr", "default_credit_percent"}
+            if not required_credit_rules.issubset(sop):
+                service_credit = {"eligible": False, "delay_minutes": delay_minutes, "outcome": "The current SOP service-credit rule could not be verified; escalate for review."}
             else:
-                service_credit = {"eligible": delay_minutes > 120, "amount_inr": amount if delay_minutes > 120 else 0, "threshold_minutes": 120, "delay_minutes": delay_minutes, "outcome": "The current cancellation and service-credit SOP applies."}
+                try:
+                    amount = min(sop["default_credit_cap_inr"], round(float(order["shipment_fee_inr"]) * sop["default_credit_percent"] / 100))
+                except (TypeError, ValueError):
+                    service_credit = {"eligible": False, "delay_minutes": delay_minutes, "outcome": "The carrier fault is established, but the shipment fee is missing or invalid; escalate before calculating a credit."}
+                else:
+                    threshold = sop["default_credit_threshold_minutes"]
+                    service_credit = {"eligible": delay_minutes > threshold, "amount_inr": amount if delay_minutes > threshold else 0, "threshold_minutes": threshold, "delay_minutes": delay_minutes, "outcome": "The current cancellation and service-credit SOP applies."}
     record["order"] = _order_for_actor(order, actor)
     return {**record, "cancellation": cancellation, "service_credit": service_credit}
 
