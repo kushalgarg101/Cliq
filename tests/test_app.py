@@ -111,6 +111,7 @@ def test_northstar_contract_overrides_default_cancellation_fee():
     assert "Fee: 0 INR" in body["answer"]
     assert body["mode"] == "offline"
     assert any(event["tool"] == "evaluate_order" for event in body["events"])
+    assert all(event["tool"] != "prepare_action" for event in body["events"])
 
 
 def test_spaced_order_reference_is_normalised_before_evaluation():

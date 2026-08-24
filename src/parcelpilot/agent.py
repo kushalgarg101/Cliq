@@ -341,7 +341,7 @@ class Agent:
             return False
         return bool(
             re.search(
-                r"\b(?:please\s+)?(?:cancel|escalate|create|open|raise|start|schedule|update)\b|"
+                r"^\s*(?:please\s+)?(?:cancel|escalate|create|open|raise|start|schedule|update)\b|"
                 r"\b(?:can|could)\s+you\s+(?:cancel|escalate|create|open|raise|start|schedule|update)\b|"
                 r"\b(?:i\s+(?:want|need)\s+to\s+cancel)\b|"
                 r"\b(?:create|start|schedule)\s+(?:a\s+)?follow\s*-?\s*up\b|"
