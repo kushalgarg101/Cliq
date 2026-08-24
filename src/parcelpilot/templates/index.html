@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <link rel="stylesheet" href="/static/app.css"><title>ParcelPilot Support</title>
+  <link rel="stylesheet" href="/static/app.css?v=20260824-3"><title>ParcelPilot Support</title>
 </head>
 <body data-csrf="{{ actor.csrf_token }}" data-data-ready="{{ 'true' if data_ready else 'false' }}">
   <header class="topbar">
@@ -21,5 +21,5 @@
       {% if actor.role == 'operations_lead' %}<section class="insights-section"><div class="section-row"><h2>Operations signals</h2><button id="load-insights" type="button">Refresh</button></div><div id="insights"><p class="empty">Load prioritised, cross-account signals.</p></div></section>{% endif %}
     </aside>
   </main>
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=20260824-3"></script>
 </body></html>
