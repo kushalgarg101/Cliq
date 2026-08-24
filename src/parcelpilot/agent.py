@@ -356,8 +356,17 @@ class Agent:
     def _draft_action_if_requested(self, message: str, actor: dict[str, Any], reference: dict[str, str]) -> dict[str, Any] | None:
         if not self._requests_action(message):
             return None
-        action_type = "create_escalation" if "escalat" in message.lower() else "create_follow_up"
-        reason = "Cancellation execution is outside this demo's capabilities; create a human follow-up after confirmation." if "cancel" in message.lower() else "User explicitly requested this action after the evidence review."
+        lower_message = message.lower()
+        can_update_ticket = actor["role"] != "customer" and "ticket_id" in reference and "update" in lower_message
+        action_type = "update_ticket" if can_update_ticket else ("create_escalation" if "escalat" in lower_message else "create_follow_up")
+        if can_update_ticket:
+            reason = "User explicitly requested a ticket update after the evidence review."
+        elif "update" in lower_message and actor["role"] == "customer":
+            reason = "Customers cannot update an internal ticket directly; create a support follow-up after confirmation."
+        elif "cancel" in lower_message:
+            reason = "Cancellation execution is outside this demo's capabilities; create a human follow-up after confirmation."
+        else:
+            reason = "User explicitly requested this action after the evidence review."
         return prepare_action(self.source_db, self.runtime_db, actor, action_type, {**reference, "reason": reason})
 
     def _order_answer(self, evaluation: dict[str, Any], text: str, sources: dict[str, Any]) -> str:

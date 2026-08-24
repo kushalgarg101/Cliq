@@ -260,6 +260,28 @@ def test_p1_ticket_uses_account_specific_target_and_can_prepare_escalation():
     assert confirmation.json()["status"] == "confirmed"
 
 
+def test_ticket_update_action_is_staff_only_and_customer_request_becomes_follow_up():
+    customer = TestClient(app)
+    customer_csrf = sign_in(customer, "northstar")
+    customer_response = customer.post(
+        "/api/chat",
+        headers={"X-CSRF-Token": customer_csrf},
+        json={"message": "Please update TKT-501."},
+    )
+    customer_pending = next(event["result"] for event in customer_response.json()["events"] if event["tool"] == "prepare_action")
+    assert customer_pending["action_type"] == "create_follow_up"
+
+    staff = TestClient(app)
+    staff_csrf = sign_in(staff, "maya")
+    staff_response = staff.post(
+        "/api/chat",
+        headers={"X-CSRF-Token": staff_csrf},
+        json={"message": "Please update TKT-501."},
+    )
+    staff_pending = next(event["result"] for event in staff_response.json()["events"] if event["tool"] == "prepare_action")
+    assert staff_pending["action_type"] == "update_ticket"
+    assert staff_pending["requires_confirmation"] is True
+
 def test_business_hours_are_not_invented_for_lumenworks_sla():
     client = TestClient(app)
     csrf_token = sign_in(client, "maya")
