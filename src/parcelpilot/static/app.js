@@ -124,7 +124,7 @@ function renderAssistantMessage(article, text) {
 }
 
 function scrollMessagesToEnd() {
-  scrollMessagesToEnd();
+  messages.scrollTop = messages.scrollHeight;
 }
 
 function toolProgressLabel(event) {
