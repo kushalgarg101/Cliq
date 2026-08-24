@@ -338,6 +338,11 @@ function showEvents(events) {
   events.forEach(event => eventPanel.append(renderToolEvent(event)));
 }
 
+input?.addEventListener('keydown', event => {
+  if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
+  event.preventDefault();
+  if (!sendButton.disabled) form.requestSubmit();
+});
 form?.addEventListener('submit', async event => {
   event.preventDefault();
   const text = input.value.trim();
