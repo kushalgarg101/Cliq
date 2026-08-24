@@ -71,6 +71,13 @@ class Agent:
             return {"answer": small_talk, "events": events, "mode": "deterministic"}
         if self.settings.llm_mode == "provider" and not self.settings.llm_api_key:
             return {"answer": "The configured AI provider has no API key. Set LLM_API_KEY or use offline mode.", "events": events, "mode": "configuration_error"}
+        # Monetary, entitlement, and SLA outcomes are deterministic records of fact. Do not
+        # ask a model to restate them: a fluent paraphrase can contradict the computed target.
+        if re.search(r"\b(?:ORD|TKT)-\d+\b", message.upper()):
+            response = self._fallback(message, actor, events)
+            if self.settings.llm_mode != "offline":
+                response["mode"] = "deterministic"
+            return response
         if self.settings.llm_mode != "offline" and self.settings.llm_api_key:
             self._precollect_evidence(message, actor, events)
             use_precollected_evidence = any(

@@ -227,6 +227,21 @@ def test_provider_explains_precollected_sources_in_one_model_call(monkeypatch):
     assert "Evidence:" not in result["answer"]
 
 
+def test_record_decisions_bypass_provider_to_prevent_factual_rewording(monkeypatch):
+    class FailingOpenAI:
+        def __init__(self, **_kwargs):
+            raise AssertionError("The provider must not receive a deterministic ticket decision.")
+
+    monkeypatch.setattr("parcelpilot.agent.OpenAI", FailingOpenAI)
+    provider_settings = replace(settings, llm_mode="provider", llm_api_key="test-key")
+    result = Agent(provider_settings, settings.source_db, settings.runtime_db).reply(
+        "Please escalate TKT-501 immediately.",
+        actor("northstar"),
+    )
+    assert result["mode"] == "deterministic"
+    assert "15 minutes, 24x7" in result["answer"]
+    assert [event["tool"] for event in result["events"]] == ["evaluate_ticket", "search_knowledge", "prepare_action"]
+
 def test_p1_ticket_uses_account_specific_target_and_can_prepare_escalation():
     client = TestClient(app)
     csrf_token = sign_in(client, "maya")
