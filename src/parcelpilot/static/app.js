@@ -123,6 +123,80 @@ function renderAssistantMessage(article, text) {
   if (!article.childNodes.length) article.textContent = String(text);
 }
 
+function scrollMessagesToEnd() {
+  scrollMessagesToEnd();
+}
+
+function toolProgressLabel(event) {
+  const result = event.result || {};
+  if (event.tool === 'evaluate_order') return `Checked order ${result.order?.order_id || 'record'} against applicable rules`;
+  if (event.tool === 'evaluate_ticket') return `Assessed ticket ${result.ticket?.ticket_id || 'record'} priority and SLA target`;
+  if (event.tool === 'search_knowledge') return `Reviewed ${result.sources?.length || 0} current authorised source${result.sources?.length === 1 ? '' : 's'}`;
+  if (event.tool === 'lookup_operations') return 'Retrieved authorised operational records';
+  if (event.tool === 'prepare_action') return 'Prepared a confirmation-gated action draft';
+  if (event.tool === 'scan_issue_signals') return 'Scanned support activity for priority signals';
+  return String(event.tool || 'Completed an authorised tool step').replaceAll('_', ' ');
+}
+
+function startActivity() {
+  const article = document.createElement('article');
+  article.className = 'activity-message';
+  const header = document.createElement('div');
+  header.className = 'activity-header';
+  const pulse = document.createElement('span');
+  pulse.className = 'activity-pulse';
+  const title = document.createElement('span');
+  title.textContent = 'Working on your request';
+  header.append(pulse, title);
+  const rows = document.createElement('div');
+  rows.className = 'activity-rows';
+  article.append(header, rows);
+  messages.append(article);
+  scrollMessagesToEnd();
+
+  const stages = [
+    'Validating your session and access scope',
+    'Preparing an authorised evidence request',
+    'Waiting for a grounded response',
+  ];
+  let stage = 0;
+  const renderStage = () => {
+    rows.replaceChildren();
+    const row = document.createElement('p');
+    row.className = 'activity-row pending';
+    row.textContent = stages[stage];
+    rows.append(row);
+    composerStatus.textContent = stages[stage];
+  };
+  renderStage();
+  const timer = window.setInterval(() => {
+    stage = Math.min(stage + 1, stages.length - 1);
+    renderStage();
+  }, 850);
+  return {article, rows, timer};
+}
+
+function finishActivity(activity, events, failed = false) {
+  window.clearInterval(activity.timer);
+  const title = activity.article.querySelector('.activity-header span:last-child');
+  title.textContent = failed ? 'Request could not be completed' : events.length ? `${events.length} tool step${events.length === 1 ? '' : 's'} completed` : 'Response completed';
+  activity.article.classList.toggle('failed', failed);
+  activity.rows.replaceChildren();
+  if (!events.length) {
+    const row = document.createElement('p');
+    row.className = `activity-row ${failed ? 'failed' : 'complete'}`;
+    row.textContent = failed ? 'No action was performed.' : 'No data tools were needed.';
+    activity.rows.append(row);
+  } else {
+    for (const event of events) {
+      const row = document.createElement('p');
+      row.className = 'activity-row complete';
+      row.textContent = toolProgressLabel(event);
+      activity.rows.append(row);
+    }
+  }
+  scrollMessagesToEnd();
+}
 function addMessage(kind, text, hasEvidence = false) {
   const article = document.createElement('article');
   article.className = `message ${kind}`;
@@ -135,7 +209,7 @@ function addMessage(kind, text, hasEvidence = false) {
     article.append(note);
   }
   messages.append(article);
-  messages.scrollTop = messages.scrollHeight;
+  scrollMessagesToEnd();
 }
 
 
@@ -269,10 +343,10 @@ form?.addEventListener('submit', async event => {
   const text = input.value.trim();
   if (!text || !appConfig.dataReady) return;
   addMessage('user', text);
+  const activity = startActivity();
   input.value = '';
   input.disabled = true;
   sendButton.disabled = true;
-  composerStatus.textContent = 'Checking authorised records…';
   try {
     const response = await fetch('/api/chat', {
       method: 'POST',
@@ -289,8 +363,10 @@ form?.addEventListener('submit', async event => {
         : errorMessage(body, 'The request could not be completed.'),
       response.ok && events.length > 0,
     );
+    finishActivity(activity, events);
     showEvents(events);
   } catch {
+    finishActivity(activity, [], true);
     addMessage('assistant', 'Network error. No action was performed. Please retry.');
   } finally {
     input.disabled = false;
