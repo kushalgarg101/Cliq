@@ -198,7 +198,7 @@ def test_provider_receives_one_corrective_round_when_it_omits_retrieval(monkeypa
     )
     assert result["mode"] == "provider"
     assert [event["tool"] for event in result["events"]] == ["evaluate_order", "search_knowledge"]
-    assert "Evidence:" in result["answer"]
+    assert "Evidence:" not in result["answer"]
 
 
 def test_provider_explains_precollected_sources_in_one_model_call(monkeypatch):
@@ -224,7 +224,7 @@ def test_provider_explains_precollected_sources_in_one_model_call(monkeypatch):
     assert [event["tool"] for event in result["events"]] == ["search_knowledge"]
     assert "tools" not in calls[0]
     assert "tool_choice" not in calls[0]
-    assert "Evidence:" in result["answer"]
+    assert "Evidence:" not in result["answer"]
 
 
 def test_p1_ticket_uses_account_specific_target_and_can_prepare_escalation():

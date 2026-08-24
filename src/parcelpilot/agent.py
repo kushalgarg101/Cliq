@@ -123,7 +123,7 @@ class Agent:
                     "role": "system",
                     "content": (
                         "The server has already collected the authorised evidence below. "
-                        "Use only this evidence, explain the answer clearly, and cite the source filenames/pages. "
+                        "Use only this evidence and explain the answer clearly. Evidence is displayed separately in the product UI, so do not add a Sources, Evidence, filename, or page list to your response. "
                         "Do not call further tools.\n\n"
                         + self._provider_evidence_context(events)
                     ),
@@ -171,17 +171,14 @@ class Agent:
                                     "content": (
                                         "Do not finalise yet. Your previous draft lacks the required evidence. "
                                         "Call evaluate_order or evaluate_ticket for any record ID in the user request, "
-                                        "then call search_knowledge for current authorised source evidence. Only then answer with citations."
+                                        "then call search_knowledge for current authorised source evidence. Only then answer clearly. The product UI will display source citations separately."
                                     ),
                                 },
                             ]
                         )
                         continue
                     answer = "I could not obtain current, citable policy evidence for this answer. I recommend escalating it for human review."
-                elif not any(source["filename"] in answer for source in supporting_sources):
-                    answer += "\n\nEvidence: " + ", ".join(
-                        f"{source['filename']} p.{source['page']}" for source in supporting_sources[:3]
-                    ) + "."
+
                 return {"answer": answer, "events": events, "mode": "provider"}
             messages.append(choice)
             for call in choice.tool_calls:
@@ -327,8 +324,7 @@ class Agent:
         events.append({"tool": "search_knowledge", "result": sources})
         if not sources["sources"]:
             return {"answer": "I could not find enough current, authorised evidence to answer safely. I recommend escalating this to support.", "events": events, "mode": "offline"}
-        citations = self._citations(sources)
-        return {"answer": f"I found current authorised guidance, but this offline mode needs an order or ticket ID for a record-specific decision. Relevant sources: {citations}", "events": events, "mode": "offline"}
+        return {"answer": "I found current authorised guidance, but this offline mode needs an order or ticket ID for a record-specific decision. Review the Evidence panel for the matching sources.", "events": events, "mode": "offline"}
 
     @staticmethod
     def _citations(sources: dict[str, Any]) -> str:
@@ -371,7 +367,7 @@ class Agent:
             outcome += f" Fee: {decision['fee_inr']} INR."
         if "amount_inr" in decision:
             outcome += f" Credit amount: {decision['amount_inr']} INR."
-        return f"{kind.title()} decision for {evaluation['order']['order_id']}: {outcome}\n\nEvidence: order {evaluation['order']['order_id']}; {self._citations(sources)}."
+        return f"{kind.title()} decision for {evaluation['order']['order_id']}: {outcome}"
 
     def _ticket_answer(self, data: dict[str, Any], sources: dict[str, Any]) -> str:
         if data.get("error"):
@@ -379,4 +375,4 @@ class Agent:
         ticket = data["ticket"]
         triage = data["triage"]
         timing = triage["timing"]
-        return f"Ticket {ticket['ticket_id']} is {triage['severity']}: {triage['reason']} Response target: {triage['response_target']}. Timing: {timing['outcome']} Historical resolution, if present, is context only and was not used as authority. Current guidance: {self._citations(sources) or 'no matching source; escalate for review.'}"
+        return f"Ticket {ticket['ticket_id']} is {triage['severity']}: {triage['reason']} Response target: {triage['response_target']}. Timing: {timing['outcome']} Historical resolution, if present, is context only and was not used as authority."

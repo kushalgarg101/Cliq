@@ -1,5 +1,6 @@
 const messages = document.querySelector('#messages');
 const eventPanel = document.querySelector('#events');
+const eventSummary = document.querySelector('#events-summary');
 const form = document.querySelector('#chat-form');
 const input = document.querySelector('#message');
 const sendButton = document.querySelector('#send-button');
@@ -122,21 +123,21 @@ function renderAssistantMessage(article, text) {
   if (!article.childNodes.length) article.textContent = String(text);
 }
 
-function addMessage(kind, text) {
+function addMessage(kind, text, hasEvidence = false) {
   const article = document.createElement('article');
   article.className = `message ${kind}`;
   if (kind === 'assistant') renderAssistantMessage(article, text);
   else article.textContent = text;
+  if (kind === 'assistant' && hasEvidence) {
+    const note = document.createElement('div');
+    note.className = 'message-note';
+    note.textContent = 'Supporting sources and tool steps are available in Evidence and tools.';
+    article.append(note);
+  }
   messages.append(article);
   messages.scrollTop = messages.scrollHeight;
 }
 
-function valueLine(label, value) {
-  const line = document.createElement('p');
-  line.className = 'event-detail';
-  line.textContent = `${label}: ${value}`;
-  return line;
-}
 
 async function readJson(response) {
   const text = await response.text();
@@ -189,42 +190,74 @@ function actionButton(result) {
   return button;
 }
 
+function valueLine(label, value) {
+  const line = document.createElement('p');
+  line.className = 'event-detail';
+  const strong = document.createElement('strong');
+  strong.textContent = `${label}: `;
+  line.append(strong, document.createTextNode(String(value)));
+  return line;
+}
+
+function sourceDetail(source) {
+  const detail = document.createElement('details');
+  detail.className = 'source-detail';
+  const summary = document.createElement('summary');
+  summary.textContent = `${source.filename} · page ${source.page}`;
+  detail.append(summary);
+  if (source.excerpt) {
+    const excerpt = document.createElement('p');
+    excerpt.className = 'source-excerpt';
+    excerpt.textContent = source.excerpt;
+    detail.append(excerpt);
+  }
+  return detail;
+}
+
 function renderToolEvent(event) {
   const card = document.createElement('article');
   card.className = 'event';
+  const tool = String(event.tool || 'tool');
+  const heading = document.createElement('div');
+  heading.className = 'event-header';
+  const icon = document.createElement('span');
+  icon.className = 'tool-icon';
+  icon.textContent = tool === 'search_knowledge' ? 'DOC' : tool === 'evaluate_order' ? 'ORD' : tool === 'evaluate_ticket' ? 'TKT' : tool === 'prepare_action' ? 'ACT' : 'RUN';
   const title = document.createElement('h3');
-  title.textContent = String(event.tool || 'tool').replaceAll('_', ' ');
-  card.append(title);
-  if (event.error) card.append(valueLine('Status', event.error));
-  const result = event.result;
-  if (result?.error) card.append(valueLine('Status', result.error));
-  if (result?.sources) {
-    for (const source of result.sources) {
-      card.append(valueLine('Source', `${source.filename} · p.${source.page}`));
-      if (source.excerpt) card.append(valueLine('Excerpt', source.excerpt));
-    }
+  title.textContent = tool.replaceAll('_', ' ');
+  heading.append(icon, title);
+  card.append(heading);
+  const body = document.createElement('div');
+  body.className = 'event-body';
+  if (event.error) body.append(valueLine('Status', event.error));
+  const result = event.result || {};
+  if (result.error) body.append(valueLine('Status', result.error));
+  if (result.order) body.append(valueLine('Order', result.order.order_id));
+  if (result.ticket) body.append(valueLine('Ticket', result.ticket.ticket_id));
+  if (result.cancellation) body.append(valueLine('Cancellation', result.cancellation.outcome));
+  if (result.service_credit) body.append(valueLine('Service credit', result.service_credit.outcome));
+  if (result.triage) body.append(valueLine('Triage', `${result.triage.severity} · ${result.triage.response_target}`));
+  if (result.signals) body.append(valueLine('Signals', `${result.signals.length} identified`));
+  if (result.sources) {
+    for (const source of result.sources) body.append(sourceDetail(source));
   }
-  if (result?.order) card.append(valueLine('Record', result.order.order_id));
-  if (result?.ticket) card.append(valueLine('Record', result.ticket.ticket_id));
-  if (result?.cancellation) card.append(valueLine('Cancellation', result.cancellation.outcome));
-  if (result?.service_credit) card.append(valueLine('Service credit', result.service_credit.outcome));
-  if (result?.triage) card.append(valueLine('Triage', `${result.triage.severity} · ${result.triage.response_target}`));
-  if (result?.signals) card.append(valueLine('Signals', `${result.signals.length} identified`));
-  if (result?.requires_confirmation) {
-    card.append(valueLine('Pending action', result.action_type.replaceAll('_', ' ')));
-    if (result.payload?.reason) card.append(valueLine('Reason', result.payload.reason));
-    card.append(valueLine('Confirmation', 'Select Confirm action to record this request.'));
-    card.append(actionButton(result));
+  if (result.requires_confirmation) {
+    body.append(valueLine('Pending action', result.action_type.replaceAll('_', ' ')));
+    if (result.payload?.reason) body.append(valueLine('Reason', result.payload.reason));
+    body.append(valueLine('Confirmation', 'Select Confirm action to record this request.'));
+    body.append(actionButton(result));
   }
+  card.append(body);
   return card;
 }
 
 function showEvents(events) {
   eventPanel.replaceChildren();
+  if (eventSummary) eventSummary.textContent = events.length ? `${events.length} step${events.length === 1 ? '' : 's'}` : 'No tools';
   if (!events.length) {
     const empty = document.createElement('p');
     empty.className = 'empty';
-    empty.textContent = 'No data tools were used.';
+    empty.textContent = 'No data tools were needed for this response.';
     eventPanel.append(empty);
     return;
   }
@@ -248,13 +281,15 @@ form?.addEventListener('submit', async event => {
     });
     const body = await readJson(response);
     if (requireSignIn(response)) return;
+    const events = Array.isArray(body.events) ? body.events : [];
     addMessage(
       'assistant',
       response.ok && typeof body.answer === 'string'
         ? body.answer
         : errorMessage(body, 'The request could not be completed.'),
+      response.ok && events.length > 0,
     );
-    showEvents(body.events || []);
+    showEvents(events);
   } catch {
     addMessage('assistant', 'Network error. No action was performed. Please retry.');
   } finally {
